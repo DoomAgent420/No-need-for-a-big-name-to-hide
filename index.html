@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>newtab</title>
-  <link rel="stylesheet" href="/css/site.css" />
+  <title>Newtab</title>
+  <link rel="stylesheet" href="site.css" />
 </head>
 <body>
   <main id="app-root">
@@ -12,12 +12,12 @@
     <pre id="out"></pre>
   </main>
 
-  <script>
-  // CONFIGURE: set this to your Worker base URL that proxies the GitHub site
+  <script type="module">
+  // Worker base that proxies your GitHub Pages site
   const WORKER_BASE = 'https://broad-meadow-a6f7.chrisjlove2022.workers.dev';
 
-  // Path to the wasm file as exposed by the Worker
-  const WASM_PATH = '/dist/app.wasm';
+  const WASM_PATH = '/app.wasm'; // Worker should proxy this path to the repo root
+  const MJS_PATH = '/app.mjs';   // Worker should proxy this too
 
   const statusEl = document.getElementById('status');
   const outEl = document.getElementById('out');
@@ -26,57 +26,80 @@
     outEl.textContent += s + '\n';
   }
 
-  async function loadWasmFromWorker() {
+  // Try to import the Emscripten-generated ES module loader if present
+  async function tryImportLoader() {
+    try {
+      const loaderUrl = new URL(MJS_PATH, WORKER_BASE).toString();
+      statusEl.textContent = 'Importing loader from ' + loaderUrl;
+      const createModule = (await import(loaderUrl)).default;
+      const Module = await createModule();
+      statusEl.textContent = 'Module ready (via loader)';
+      log('Exports: ' + Object.keys(Module).join(', '));
+      // If you exported functions via Emscripten, call them via Module._my_exported
+      if (typeof Module._my_exported === 'function') {
+        const r = Module._my_exported();
+        log('my_exported() -> ' + r);
+      }
+      // Notify parent (MetalChair) if embedded
+      if (window.parent && window.parent !== window) {
+        parent.postMessage({ type: 'wasm-ready' }, '*');
+      }
+      return true;
+    } catch (e) {
+      console.warn('Loader import failed, falling back to raw instantiate:', e);
+      return false;
+    }
+  }
+
+  // Raw instantiate fallback (for raw .wasm exports)
+  async function rawInstantiate() {
     const wasmUrl = new URL(WASM_PATH, WORKER_BASE).toString();
     statusEl.textContent = 'Fetching WASM from ' + wasmUrl;
-
     try {
-      // Try instantiateStreaming first (fastest, requires correct MIME)
       if ('instantiateStreaming' in WebAssembly) {
         const resp = await fetch(wasmUrl, { credentials: 'same-origin' });
         if (resp.ok) {
           try {
-            const { instance, module } = await WebAssembly.instantiateStreaming(resp, {});
+            const { instance } = await WebAssembly.instantiateStreaming(resp, {});
             statusEl.textContent = 'WASM instantiated (streaming)';
-            return instance;
+            if (instance.exports && typeof instance.exports.my_exported === 'function') {
+              const r = instance.exports.my_exported();
+              log('my_exported() -> ' + r);
+            } else {
+              log('Exports: ' + Object.keys(instance.exports).join(', '));
+            }
+            if (window.parent && window.parent !== window) parent.postMessage({ type: 'wasm-ready' }, '*');
+            return;
           } catch (streamErr) {
-            // streaming failed (likely wrong MIME); fall back
-            console.warn('instantiateStreaming failed, falling back:', streamErr);
+            console.warn('instantiateStreaming failed, falling back to arrayBuffer:', streamErr);
           }
         } else {
-          throw new Error('Fetch failed: ' + resp.status + ' ' + resp.statusText);
+          throw new Error('Fetch failed: ' + resp.status);
         }
       }
 
-      // Fallback: fetch arrayBuffer then instantiate
       const resp2 = await fetch(wasmUrl, { credentials: 'same-origin' });
-      if (!resp2.ok) throw new Error('Fetch failed: ' + resp2.status + ' ' + resp2.statusText);
+      if (!resp2.ok) throw new Error('Fetch failed: ' + resp2.status);
       const bytes = await resp2.arrayBuffer();
       const { instance } = await WebAssembly.instantiate(bytes, {});
-      statusEl.textContent = 'WASM instantiated (arrayBuffer fallback)';
-      return instance;
+      statusEl.textContent = 'WASM instantiated (arrayBuffer)';
+      if (instance.exports && typeof instance.exports.my_exported === 'function') {
+        const r = instance.exports.my_exported();
+        log('my_exported() -> ' + r);
+      } else {
+        log('Exports: ' + Object.keys(instance.exports).join(', '));
+      }
+      if (window.parent && window.parent !== window) parent.postMessage({ type: 'wasm-ready' }, '*');
     } catch (err) {
       statusEl.textContent = 'WASM load failed';
       log('Error: ' + err);
-      throw err;
+      console.error(err);
     }
   }
 
   (async () => {
-    try {
-      const instance = await loadWasmFromWorker();
-
-      // Example: call an exported function named "my_exported"
-      // NOTE: export name depends on how you compiled the C++/Emscripten build.
-      if (instance && instance.exports && typeof instance.exports.my_exported === 'function') {
-        const result = instance.exports.my_exported();
-        log('my_exported() returned: ' + result);
-      } else {
-        log('No exported function "my_exported" found. Exports: ' + Object.keys(instance.exports).join(', '));
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    const ok = await tryImportLoader();
+    if (!ok) await rawInstantiate();
   })();
   </script>
 </body>
