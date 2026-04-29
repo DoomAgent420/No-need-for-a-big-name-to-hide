@@ -102,5 +102,261 @@
     if (!ok) await rawInstantiate();
   })();
   </script>
+  <!-- BEGIN Dev Console -->
+<style>
+  #devConsole { position: fixed; right: 12px; bottom: 12px; width: 520px; max-height: 60vh; background:#0f1724; color:#e6eef8; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto; border-radius:10px; box-shadow:0 8px 30px rgba(2,6,23,.6); z-index:99999; display:flex; flex-direction:column; overflow:hidden; }
+  #devHeader { display:flex; gap:8px; align-items:center; padding:10px; background:linear-gradient(90deg,#071029,#0b1220); border-bottom:1px solid rgba(255,255,255,.04); }
+  #devHeader input { flex:1; padding:8px; border-radius:6px; border:1px solid rgba(255,255,255,.06); background:rgba(255,255,255,.02); color:inherit; }
+  #devHeader button { padding:8px 10px; border-radius:6px; border:0; background:#2563eb; color:#fff; cursor:pointer; }
+  #devBody { display:flex; gap:8px; padding:10px; overflow:auto; }
+  #devLeft { width: 260px; display:flex; flex-direction:column; gap:8px; }
+  #devRight { flex:1; display:flex; flex-direction:column; gap:8px; }
+  .devBtn { padding:8px; border-radius:6px; border:0; background:#111827; color:#e6eef8; cursor:pointer; text-align:left; }
+  .devSmall { font-size:12px; color:#9aa7c7; }
+  #devOutput { background:#071025; padding:8px; border-radius:6px; height:220px; overflow:auto; font-family: monospace; font-size:12px; color:#dbeafe; }
+  table.devTable { width:100%; border-collapse:collapse; font-size:12px; color:#cfe8ff; }
+  table.devTable td { padding:4px 6px; border-bottom:1px dashed rgba(255,255,255,.03); vertical-align:top; }
+  .devHeaderLabel { color:#93c5fd; font-weight:700; }
+  #devFooter { display:flex; gap:8px; padding:8px; border-top:1px solid rgba(255,255,255,.03); background:linear-gradient(180deg,#071025,#06101b); }
+  #devToggle { position:fixed; right:12px; bottom:12px; width:44px; height:44px; border-radius:50%; background:#111827; color:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:99998; box-shadow:0 6px 18px rgba(2,6,23,.6); }
+</style>
+
+<div id="devConsole" aria-hidden="false">
+  <div id="devHeader">
+    <input id="devUrl" type="text" value="https://broad-meadow-a6f7.chrisjlove2022.workers.dev/app.wasm" />
+    <button id="btnHead">HEAD</button>
+    <button id="btnFetch">Fetch</button>
+  </div>
+
+  <div id="devBody">
+    <div id="devLeft">
+      <button class="devBtn" id="btnStream">instantiateStreaming</button>
+      <button class="devBtn" id="btnImport">Import app.mjs</button>
+      <button class="devBtn" id="btnPostPing">PostMessage Ping</button>
+      <div class="devSmall">Console capture</div>
+      <button class="devBtn" id="btnClear">Clear Output</button>
+      <div class="devSmall" style="margin-top:6px">Quick checks</div>
+      <button class="devBtn" id="btnHeadRoot">HEAD / (root)</button>
+      <button class="devBtn" id="btnFetchRoot">Fetch /index.html</button>
+    </div>
+
+    <div id="devRight">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <div class="devHeaderLabel">Status</div>
+        <div id="devStatus" class="devSmall">idle</div>
+      </div>
+
+      <div id="devOutput" role="log" aria-live="polite"></div>
+
+      <div style="display:flex; gap:8px;">
+        <div style="flex:1">
+          <div class="devHeaderLabel">Response Headers</div>
+          <div id="devHeaders" style="background:#051022; padding:6px; border-radius:6px; height:120px; overflow:auto; font-family:monospace; font-size:12px;"></div>
+        </div>
+        <div style="flex:1">
+          <div class="devHeaderLabel">Body Preview</div>
+          <div id="devBodyPreview" style="background:#051022; padding:6px; border-radius:6px; height:120px; overflow:auto; font-family:monospace; font-size:12px;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="devFooter">
+    <div class="devSmall">Captured messages</div>
+    <div id="devMsgs" style="flex:1; font-family:monospace; font-size:12px; color:#cfe8ff; overflow:auto; max-height:60px;"></div>
+  </div>
+</div>
+
+<div id="devToggle" title="Toggle Dev Console">⚙</div>
+
+<script>
+(function(){
+  const devConsole = document.getElementById('devConsole');
+  const toggle = document.getElementById('devToggle');
+  const urlInput = document.getElementById('devUrl');
+  const out = document.getElementById('devOutput');
+  const headersEl = document.getElementById('devHeaders');
+  const bodyPreview = document.getElementById('devBodyPreview');
+  const status = document.getElementById('devStatus');
+  const msgs = document.getElementById('devMsgs');
+
+  function setStatus(s) { status.textContent = s; }
+  function appendOut(s, kind) {
+    const time = new Date().toLocaleTimeString();
+    const el = document.createElement('div');
+    el.textContent = `[${time}] ${s}`;
+    if (kind === 'err') el.style.color = '#fca5a5';
+    out.appendChild(el);
+    out.scrollTop = out.scrollHeight;
+  }
+  function setHeaders(h) {
+    headersEl.innerHTML = '';
+    for (const [k,v] of Object.entries(h || {})) {
+      const row = document.createElement('div');
+      row.textContent = k + ': ' + v;
+      headersEl.appendChild(row);
+    }
+  }
+  function setBodyPreview(text) {
+    bodyPreview.textContent = text || '';
+  }
+
+  toggle.addEventListener('click', () => {
+    const hidden = devConsole.getAttribute('aria-hidden') === 'true';
+    devConsole.style.display = hidden ? 'flex' : 'none';
+    devConsole.setAttribute('aria-hidden', hidden ? 'false' : 'true');
+  });
+
+  document.getElementById('btnClear').addEventListener('click', () => {
+    out.innerHTML = '';
+    headersEl.innerHTML = '';
+    bodyPreview.innerHTML = '';
+    msgs.innerHTML = '';
+    setStatus('idle');
+  });
+
+  async function headFetch(path) {
+    const url = path || urlInput.value.trim();
+    setStatus('HEAD ' + url);
+    appendOut('HEAD ' + url);
+    try {
+      const r = await fetch(url, { method: 'HEAD', mode: 'cors' });
+      setHeaders(Object.fromEntries(r.headers.entries()));
+      appendOut('HEAD status: ' + r.status);
+      setStatus('HEAD done');
+      return r;
+    } catch (e) {
+      appendOut('HEAD failed: ' + e, 'err');
+      setStatus('HEAD error');
+      throw e;
+    }
+  }
+
+  async function fullFetch(path) {
+    const url = path || urlInput.value.trim();
+    setStatus('FETCH ' + url);
+    appendOut('FETCH ' + url);
+    try {
+      const r = await fetch(url, { mode: 'cors', credentials: 'same-origin' });
+      setHeaders(Object.fromEntries(r.headers.entries()));
+      appendOut('FETCH status: ' + r.status);
+      const ct = r.headers.get('Content-Type') || '';
+      if (ct.includes('application/wasm')) {
+        setBodyPreview('[binary wasm response — length ' + (r.headers.get('Content-Length') || 'unknown') + ']');
+      } else {
+        const text = await r.text();
+        setBodyPreview(text.slice(0, 2000));
+      }
+      setStatus('FETCH done');
+      return r;
+    } catch (e) {
+      appendOut('FETCH failed: ' + e, 'err');
+      setStatus('FETCH error');
+      throw e;
+    }
+  }
+
+  async function tryInstantiateStreaming() {
+    const url = urlInput.value.trim();
+    setStatus('instantiateStreaming ' + url);
+    appendOut('instantiateStreaming ' + url);
+    try {
+      if (!WebAssembly.instantiateStreaming) {
+        appendOut('instantiateStreaming not supported in this browser', 'err');
+        setStatus('no streaming');
+        return;
+      }
+      const resp = await fetch(url, { mode: 'cors', credentials: 'same-origin' });
+      setHeaders(Object.fromEntries(resp.headers.entries()));
+      const { instance } = await WebAssembly.instantiateStreaming(resp, {});
+      appendOut('instantiateStreaming succeeded. Exports: ' + Object.keys(instance.exports).join(', '));
+      setStatus('wasm instantiated');
+    } catch (e) {
+      appendOut('instantiateStreaming failed: ' + e, 'err');
+      setStatus('streaming failed');
+    }
+  }
+
+  async function tryImportMjs() {
+    const base = urlInput.value.trim();
+    // assume app.mjs is at same base path
+    const mjs = base.replace(/\/[^/]*$/, '/app.mjs').replace(/\/\//g,'/');
+    setStatus('import ' + mjs);
+    appendOut('import ' + mjs);
+    try {
+      const mod = await import(mjs);
+      const createModule = mod.default || mod.createModule || mod.createModule;
+      appendOut('import succeeded. module keys: ' + Object.keys(mod).join(', '));
+      if (typeof createModule === 'function') {
+        appendOut('calling createModule() (may run Emscripten init)');
+        const Module = await createModule();
+        appendOut('createModule resolved. Module keys: ' + Object.keys(Module).slice(0,20).join(', '));
+      }
+      setStatus('import done');
+    } catch (e) {
+      appendOut('import failed: ' + e, 'err');
+      setStatus('import error');
+    }
+  }
+
+  // Buttons
+  document.getElementById('btnHead').addEventListener('click', () => headFetch());
+  document.getElementById('btnFetch').addEventListener('click', () => fullFetch());
+  document.getElementById('btnStream').addEventListener('click', () => tryInstantiateStreaming());
+  document.getElementById('btnImport').addEventListener('click', () => tryImportMjs());
+  document.getElementById('btnPostPing').addEventListener('click', () => {
+    const targetOrigin = '*';
+    const msg = { type: 'dev-ping', payload: { ts: Date.now() } };
+    try {
+      // post to parent if embedded, otherwise broadcast to window
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(msg, targetOrigin);
+        appendOut('posted dev-ping to parent');
+      } else {
+        // broadcast to frames
+        for (const f of document.getElementsByTagName('iframe')) {
+          try { f.contentWindow.postMessage(msg, targetOrigin); appendOut('posted dev-ping to iframe ' + (f.src||'about:blank')); } catch(e){ appendOut('post failed: '+e,'err'); }
+        }
+      }
+    } catch (e) {
+      appendOut('postMessage failed: ' + e, 'err');
+    }
+  });
+
+  document.getElementById('btnHeadRoot').addEventListener('click', () => headFetch(new URL('/', location.href).toString()));
+  document.getElementById('btnFetchRoot').addEventListener('click', () => fullFetch(new URL('/index.html', location.href).toString()));
+
+  // Capture window messages
+  window.addEventListener('message', (ev) => {
+    const origin = ev.origin;
+    const data = ev.data;
+    const line = `msg from ${origin || 'null'}: ${JSON.stringify(data)}`;
+    const el = document.createElement('div');
+    el.textContent = line;
+    msgs.appendChild(el);
+    msgs.scrollTop = msgs.scrollHeight;
+    appendOut('received message: ' + JSON.stringify(data));
+  });
+
+  // Capture console logs and errors
+  (function(){
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = function(...args){ origLog.apply(console, args); appendOut('console.log: ' + args.map(a=>String(a)).join(' ')); };
+    console.error = function(...args){ origErr.apply(console, args); appendOut('console.error: ' + args.map(a=>String(a)).join(' '), 'err'); };
+    window.addEventListener('error', (ev) => { appendOut('window error: ' + ev.message + ' at ' + ev.filename + ':' + ev.lineno, 'err'); });
+    window.addEventListener('unhandledrejection', (ev) => { appendOut('unhandledrejection: ' + (ev.reason && ev.reason.stack ? ev.reason.stack : String(ev.reason)), 'err'); });
+  })();
+
+  // Auto-detect a likely wasm path if user left default
+  if (!urlInput.value || urlInput.value.includes('workers.dev')) {
+    // keep as-is
+  }
+
+  // expose helper for manual console use
+  window.__devConsole = { headFetch, fullFetch, tryInstantiateStreaming, tryImportMjs, appendOut };
+})();
+</script>
+<!-- END Dev Console -->
 </body>
 </html>
