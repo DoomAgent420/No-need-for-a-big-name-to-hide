@@ -1,0 +1,37 @@
+name: Build WASM (Emscripten) and commit artifacts
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Build with emscripten docker image
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/src" emscripten/emsdk emcc /src/main.cpp -O2 -sMODULARIZE=1 -sEXPORT_NAME="createModule" -sEXPORT_ES6=1 -o /src/app.mjs -sEXPORTED_FUNCTIONS='["_my_exported"]'
+          # emcc will produce app.mjs and app.wasm in the repo root
+
+      - name: Show produced files
+        run: ls -la
+
+      - name: Commit and push build artifacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app.mjs app.wasm || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Build: add compiled WASM and loader"
+            git push origin HEAD:main
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
