@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WASM App</title>
+  <link rel="stylesheet" href="/css/site.css" />
+</head>
+<body>
+  <main id="app-root">
+    <h1>WASM App</h1>
+    <div id="status">Loading...</div>
+    <div id="ui"></div>
+  </main>
+
+  <script type="module">
+    import createModule from './dist/app.mjs';
+
+    async function boot() {
+      const status = document.getElementById('status');
+      try {
+        status.textContent = 'Initializing module...';
+        const Module = await createModule();
+        status.textContent = 'Module ready';
+
+        // Example: call an exported function named _myExportedFunc
+        // const result = Module._myExportedFunc();
+        // document.getElementById('ui').textContent = 'Result: ' + result;
+      } catch (err) {
+        console.error('WASM init failed', err);
+        status.textContent = 'Failed to load module. See console.';
+      }
+    }
+
+    boot();
+  </script>
+</body>
+</html>
