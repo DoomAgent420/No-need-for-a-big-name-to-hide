@@ -19,7 +19,7 @@
   const WORKER_BASE = 'https://broad-meadow-a6f7.chrisjlove2022.workers.dev';
 
   const WASM_PATH = '/app.wasm'; // Worker should proxy this path to the repo root
-  const MJS_PATH = '/app.mjs';   // Worker should proxy this too
+  const JS_PATH = '/app.js';   // Worker should proxy this too
 
   const statusEl = document.getElementById('status');
   const outEl = document.getElementById('out');
@@ -31,7 +31,7 @@
   // Try to import the Emscripten-generated ES module loader if present
   async function tryImportLoader() {
     try {
-      const loaderUrl = new URL(MJS_PATH, WORKER_BASE).toString();
+      const loaderUrl = new URL(JS_PATH, WORKER_BASE).toString();
       statusEl.textContent = 'Importing loader from ' + loaderUrl;
       const createModule = (await import(loaderUrl)).default;
       const Module = await createModule();
