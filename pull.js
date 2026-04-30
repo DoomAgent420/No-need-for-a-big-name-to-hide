@@ -1,3 +1,14 @@
+// Top of pull.js — global guard to stop any later WASM attempts
+window.__MODULE_LOADED__ = window.__MODULE_LOADED__ || false;
+window.__BLOCK_WASM_IF_MODULE_LOADED__ = true;
+
+function blockWasmIfModuleLoaded(url) {
+  if (!window.__BLOCK_WASM_IF_MODULE_LOADED__) return false;
+  try {
+    const u = String(url || '');
+    return window.__MODULE_LOADED__ && (u.endsWith('/app.wasm') || u.includes('/app.wasm'));
+  } catch (e) { return false; }
+}
 // pull.js — Worker-first loader with robust fallbacks and early stop after JS module loads
 // Configure these for your project:
 const WORKER_ORIGIN = "https://broad-meadow-a6f7.chrisjlove2022.workers.dev";
