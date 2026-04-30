@@ -1,8 +1,8 @@
-// pull.js — Worker-first but honest: probe Worker, import from best source, log everything
+// pull.js — Worker-first loader with robust fallbacks and early stop after JS module loads
 // Configure these for your project:
 const WORKER_ORIGIN = "https://broad-meadow-a6f7.chrisjlove2022.workers.dev";
 const PAGES_ORIGIN  = "https://chrisjlove2022.github.io/No-need-for-a-big-name-to-hide";
-const CDN_FALLBACK   = "https://cdn.jsdelivr.net/gh/chrisjlove2022/No-need-for-a-big-name-to-hide@main/app.mjs";
+const CDN_FALLBACK  = "https://cdn.jsdelivr.net/gh/chrisjlove2022/No-need-for-a-big-name-to-hide@main/app.mjs";
 
 // Optional: force worker-only mode (true = try worker only, then stop)
 const FORCE_WORKER_ONLY = false;
@@ -23,7 +23,7 @@ function diagLog(step, url, ok, err) {
 
 // Try a simple fetch probe to see if the Worker endpoint is reachable
 async function probeWorker() {
-  const probeUrl = WORKER_ORIGIN + '/ping'; // safe path; Worker should respond to simple fetch
+  const probeUrl = WORKER_ORIGIN + '/ping';
   try {
     const r = await fetch(probeUrl, { method: 'GET', mode: 'cors', cache: 'no-store' });
     diagLog('worker-probe', probeUrl, r.ok, r.ok ? null : `status ${r.status}`);
@@ -52,7 +52,7 @@ async function tryImport(u, label) {
   setStatus('Starting loader');
   appendOut('Loader start: prefer Worker when reachable');
 
-  // 1) If forcing worker-only, probe and try worker import only
+  // If forcing worker-only, probe and try worker import only
   if (FORCE_WORKER_ONLY) {
     setStatus('Worker-only mode');
     const ok = await probeWorker();
@@ -67,9 +67,11 @@ async function tryImport(u, label) {
             const Module = await factory();
             appendOut('Module.my_exported() -> ' + (Module.my_exported ? Module.my_exported() : 'no export'));
             window.AppModule = Module;
+            window.__MODULE_LOADED__ = true;
+            appendOut('JS module loaded — skipping any WASM attempts');
+            return;
           } else appendOut('Worker module has no default factory');
         } catch (e) { appendOut('Worker factory error: ' + e); }
-        return;
       }
     }
     appendOut('Worker-only mode failed to load module');
@@ -77,7 +79,7 @@ async function tryImport(u, label) {
     return;
   }
 
-  // 2) Normal flow: probe Worker first, but don't assume failure until we've tried other sane sources
+  // Normal flow: probe Worker first
   setStatus('Probing Worker');
   const workerReachable = await probeWorker();
 
@@ -93,9 +95,13 @@ async function tryImport(u, label) {
           const Module = await factory();
           appendOut('Module.my_exported() -> ' + (Module.my_exported ? Module.my_exported() : 'no export'));
           window.AppModule = Module;
+          // NEW: mark module loaded and stop further WASM attempts
+          window.__MODULE_LOADED__ = true;
+          appendOut('JS module loaded — skipping any WASM attempts');
+          return; // exit loader early, no WASM attempts
         } else appendOut('Worker module has no default factory');
       } catch (e) { appendOut('Worker factory error: ' + e); }
-      return;
+      appendOut('Import from Worker failed despite probe success — falling back');
     } else {
       appendOut('Import from Worker failed despite probe success — falling back');
     }
@@ -103,13 +109,12 @@ async function tryImport(u, label) {
     appendOut('Worker not reachable (probe failed) — falling back to Pages/CDN');
   }
 
-  // 3) Try same-origin Pages import (relative or absolute)
+  // Try same-origin Pages import (relative then absolute)
   setStatus('Trying Pages import (relative then absolute)');
-  // try relative first (works when page and module are same origin)
   let mod = await tryImport('./app.mjs', 'local-relative');
   if (!mod) mod = await tryImport(PAGES_ORIGIN + '/app.mjs', 'pages-absolute');
 
-  // 4) Try CDN fallback if Pages failed
+  // Try CDN fallback if Pages failed
   if (!mod) {
     setStatus('Trying CDN fallback');
     mod = await tryImport(CDN_FALLBACK, 'jsdelivr');
@@ -118,11 +123,10 @@ async function tryImport(u, label) {
   if (!mod) {
     setStatus('All module import attempts failed');
     appendOut('All module import attempts failed — loader will not attempt WASM if JS module missing.');
-    // Optionally, you could attempt WASM here, but only if you want that behavior.
     return;
   }
 
-  // 5) If we have a module, initialize it
+  // Initialize the JS module and stop further WASM attempts
   try {
     const factory = mod.default;
     if (factory && typeof factory === 'function') {
@@ -132,11 +136,48 @@ async function tryImport(u, label) {
       window.AppModule = Module;
       // record which source succeeded
       window.pullMode = window.pullDiagnostics.success ? window.pullDiagnostics.success.step : 'module';
+
+      // NEW: mark module loaded and stop further WASM attempts
+      window.__MODULE_LOADED__ = true;
+      appendOut('JS module loaded — skipping any WASM attempts');
+      return; // important: exit the loader here
     } else {
       appendOut('Module imported but no default factory; exports: ' + Object.keys(mod || {}).join(','));
     }
   } catch (err) {
     appendOut('Module factory threw: ' + err);
     setStatus('Module factory error');
+  }
+
+  // If you still want to attempt WASM as a last resort, guard it so it never runs when JS module succeeded.
+  if (window.__MODULE_LOADED__) {
+    appendOut('Skipping WASM because JS module already loaded');
+    return;
+  }
+
+  // Optional WASM attempt block (kept for completeness). It will only run if no JS module loaded.
+  // Replace or remove this block if you do not want WASM attempts at all.
+  try {
+    setStatus('Attempting WASM fallback');
+    // Example WASM URL (same origin)
+    const wasmUrl = PAGES_ORIGIN + '/app.wasm';
+    // instantiateStreaming if available
+    if (WebAssembly.instantiateStreaming) {
+      appendOut('instantiateStreaming -> ' + wasmUrl);
+      const r = await fetch(wasmUrl, { cache: 'no-store' });
+      if (!r.ok) throw new Error('WASM fetch failed status ' + r.status);
+      const { instance } = await WebAssembly.instantiateStreaming(r);
+      appendOut('WASM instantiated via instantiateStreaming');
+      window.AppWasm = instance;
+    } else {
+      appendOut('instantiateStreaming not available, trying raw fetch+instantiate');
+      const buf = await (await fetch(wasmUrl, { cache: 'no-store' })).arrayBuffer();
+      const { instance } = await WebAssembly.instantiate(buf);
+      appendOut('WASM instantiated via raw instantiate');
+      window.AppWasm = instance;
+    }
+  } catch (e) {
+    appendOut('WASM attempt failed: ' + e);
+    setStatus('WASM fallback failed');
   }
 })();
