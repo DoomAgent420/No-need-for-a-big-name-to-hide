@@ -13,7 +13,7 @@ function blockWasmIfModuleLoaded(url) {
 // Configure these for your project:
 const WORKER_ORIGIN = "https://broad-meadow-a6f7.chrisjlove2022.workers.dev";
 const PAGES_ORIGIN  = "https://chrisjlove2022.github.io/No-need-for-a-big-name-to-hide";
-const CDN_FALLBACK  = "https://cdn.jsdelivr.net/gh/chrisjlove2022/No-need-for-a-big-name-to-hide@main/app.mjs";
+const CDN_FALLBACK  = "https://cdn.jsdelivr.net/gh/chrisjlove2022/No-need-for-a-big-name-to-hide@main/app.js";
 
 // Optional: force worker-only mode (true = try worker only, then stop)
 const FORCE_WORKER_ONLY = false;
@@ -68,7 +68,7 @@ async function tryImport(u, label) {
     setStatus('Worker-only mode');
     const ok = await probeWorker();
     if (ok) {
-      const mod = await tryImport(WORKER_ORIGIN + '/app.mjs', 'worker-module');
+      const mod = await tryImport(WORKER_ORIGIN + '/app.js', 'worker-module');
       if (mod) {
         setStatus('Loaded module from Worker');
         window.pullMode = 'worker';
@@ -96,7 +96,7 @@ async function tryImport(u, label) {
 
   if (workerReachable) {
     setStatus('Worker reachable — trying to import from Worker');
-    const mod = await tryImport(WORKER_ORIGIN + '/app.mjs', 'worker-module');
+    const mod = await tryImport(WORKER_ORIGIN + '/app.js', 'worker-module');
     if (mod) {
       setStatus('Loaded module from Worker');
       window.pullMode = 'worker';
@@ -122,8 +122,8 @@ async function tryImport(u, label) {
 
   // Try same-origin Pages import (relative then absolute)
   setStatus('Trying Pages import (relative then absolute)');
-  let mod = await tryImport('./app.mjs', 'local-relative');
-  if (!mod) mod = await tryImport(PAGES_ORIGIN + '/app.mjs', 'pages-absolute');
+  let mod = await tryImport('./app.js', 'local-relative');
+  if (!mod) mod = await tryImport(PAGES_ORIGIN + '/app.js', 'pages-absolute');
 
   // Try CDN fallback if Pages failed
   if (!mod) {
